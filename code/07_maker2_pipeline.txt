@@ -1,0 +1,130 @@
+# 1 Create new control files for your MAKER run
+
+maker -CTL
+
+
+    	maker_bopts.ctl containing settings for BLAST and Exonerate.
+    	masker_exe.ctl with all the paths to different executables used by MAKER on your system.
+    	maker_opts.ctl is the file controlling MAKERs running behavior. This file will be changed before every MAKER run.
+
+# Make changes in maker_opts.ctl
+
+	genome=/home/igobazov/IB_paper_2/analysis/02_wgs_assembly/GapCloser/sel3_NW_015504249.fna
+	est=/home/igobazov/IB_paper_2/analysis/03_rna_assembly/rna_trinity_paired/Trinity.combined.fasta
+	est2genome=1 #infer gene predictions directly from ESTs, 1 = yes, 0 = no
+
+# run maker2 round 1
+
+maker
+
+# 2 train the first gene predictor SNAP with the results acquired in Step 1. Extract the results stored in a directory with the name of assembly file plus .maker.output. To create a GFF3 file containing all the preliminary gene predications created in Step 1, execute:
+
+gff3_merge -d sel3_NW_015504249.maker.output/sel3_NW_015504249_master_datastore_index.log 
+
+# generate the necessary files for training SNAP:
+
+maker2zff sel3_NW_015504249.all.gff
+
+# This script creates two files: genome.ann and genome.dna which contain information about the gene sequences (such as exons and introns) as well as the actual DNA sequences.
+
+# validate them with fathom to detect erroneous predictions:
+
+fathom genome.ann genome.dna -validate > snap_validate_output.txt
+
+# 47 genes, 47 OK, 17 warnings, 0 errors
+
+# create the remaining input files for training SNAP.
+
+fathom genome.ann genome.dna -categorize 1000
+fathom uni.ann uni.dna -export 1000 -plus 
+forge export.ann export.dna
+
+# train SNAP with hmm-assembler
+
+hmm-assembler.pl /home/igobazov/IB_paper_2/analysis/02_wgs_assembly/GapCloser/sel3_NW_015504249.fna . > sel3_NW_015504249.fna.hmm
+
+# training SNAP round 3
+# link the newly created SNAP hmm file in the MAKER control file. Change the following line in the maker_opts.ctl file:
+
+snaphmm=/home/igobazov/IB_paper_2/analysis/04_genome_annotation/maker_round_1/sel3_NW_015504249.fna.hmm #SNAP HMM file
+
+# remove the filepaths to the est evidence or set the flags for est2genome=0 
+# run round 2
+
+maker
+
+# step 4 - After MAKER is finished repeat Step 2 to create another set of hmms for SNAP.
+
+> 29 genes, 29 OK, 4 warnings, 0 errors
+
+# Augustus - follow Step 2 till you have the export.ann and export.dna files
+
+> 20 genes, 20 OK, 4 warnings, 0 errors
+
+
+####### train the second gene predictor AUGUSTUS.
+
+# Repeat Step 2 till you have the export.ann and export.dna files. 
+
+# Use Perl script which converts SNAP ZFF files to GBK files.
+
+# https://github.com/hyphaltip/genome-scripts/blob/master/gene_prediction/zff2augustus_gbk.pl
+
+# run in the directory containing the export.ann and export.dna files.
+
+zff2augustus_gbk.pl > augustus.gbk
+
+# split the now created augustus.gbk file into a training and a test set:
+
+perl randomSplit.pl augustus.gbk 5
+
+# create a new species for our AUGUSTUS training:
+
+new_species.pl --species=human
+
+# train AUGUSTUS with the training set file, evaluate the training and save the output of this test to a file for later reference:
+
+etraining --species=human augustus.gbk.train
+augustus --species=human augustus.gbk.test | tee first_training.out
+
+# improve prediction parameters of the models
+
+optimize_augustus.pl --AUGUSTUS_CONFIG_PATH=./config/ --species=human augustus.gbk.train
+
+# After this is done we can retrain and test AUGUSTUS with the optimized paramters and compare the results to the first run:
+
+etraining --species=human augustus.gbk.train --AUGUSTUS_CONFIG_PATH=./config/
+augustus --species=human 
+
+augustus.gbk.test --AUGUSTUS_CONFIG_PATH=./config/| tee second_training.out
+
+*** last Maker run ***
+
+# Change maker_opts.ctl:
+
+augustus_species=human
+keep_preds=1
+
+export AUGUSTUS_CONFIG_PATH="/home/igobazov/IB_paper_2/analysis/04_genome_annotation/maker_round_1/sel3_NW_015504249.maker.output/config"
+
+maker
+
+*** Maker is now finished!!!
+
+# check if there are any errors:
+
+> less sel3_NW_nnn_master_datastore_index.log
+
+It should show:
+
+NW_015504249.1  sel3_NW_015504249.maker.output/sel3_NW_015504249_datastore/31/BC/NW_015504249.1 STARTED
+
+NW_015504249.1 sel3_NW_015504249.maker.output/sel3_NW_015504249_datastore/31/BC/NW_015504249.1 FINISHED
+
+# results folder:
+
+/home/igobazov/IB_paper_2/analysis/04_genome_annotation/maker_round_1/sel3_NW_015504249.maker.output/sel3_NW_015504249_datastore/31/BC/NW_015504249.1
+/
+
+
+
